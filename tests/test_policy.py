@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import timedelta
 
 import pytest
 from conftest import NOW
@@ -62,3 +63,26 @@ def test_malformed_resource_ttl_is_ineligible(policy, cloud, ttl):
     r["labels"]["janitor-ttl-hours"] = ttl
     action, reason = evaluate(r, {"first_seen_at": iso(NOW)}, policy, NOW)
     assert action is None and reason in ("invalid_ttl", "invalid_expiry")
+
+
+def test_ttl_uses_first_seen_and_iso_expiry(policy, cloud):
+    r = next(iter(cloud.resources.values()))
+    assert evaluate(r, {}, policy, NOW)[0] == "deallocate"
+    r["labels"].pop("janitor-expires-at")
+    s = {"first_seen_at": iso(NOW)}
+    assert evaluate(r, s, policy, NOW)[1] == "not_expired"
+    assert evaluate(r, s, policy, NOW + timedelta(hours=25))[0] == "deallocate"
+
+
+@pytest.mark.parametrize(
+    "mutate,reason",
+    [
+        (lambda r: r["labels"].update({"do-not-cleanup": "false"}), "excluded"),
+        (lambda r: r["labels"].pop("janitor-managed"), "not_opted_in"),
+        (lambda r: r.update(status="transitioning"), "transitioning"),
+    ],
+)
+def test_protection_labels_fail_closed(policy, cloud, mutate, reason):
+    r = next(iter(cloud.resources.values()))
+    mutate(r)
+    assert evaluate(r, {}, policy, NOW) == (None, reason)
