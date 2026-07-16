@@ -5,6 +5,7 @@ import pytest
 from conftest import NOW
 
 from janitor.config import ConfigError, iso, narrow
+from janitor.models import fingerprint
 from janitor.policy import evaluate
 
 
@@ -86,3 +87,27 @@ def test_protection_labels_fail_closed(policy, cloud, mutate, reason):
     r = next(iter(cloud.resources.values()))
     mutate(r)
     assert evaluate(r, {}, policy, NOW) == (None, reason)
+
+
+def test_stopped_vm_needs_our_confirmed_stop_and_grace(policy, cloud):
+    policy = replace(policy, mode="lifecycle")
+    r = next(iter(cloud.resources.values()))
+    r["labels"]["janitor-allow-delete"] = "true"
+    s = {"stop": {"fingerprint": fingerprint(r, stop_authority=True)}}
+    r.update(status="inactive")
+    r["snapshot"]["power_state"] = "PowerState/deallocated"
+    r["snapshot"]["power_time"] = iso(NOW)
+    assert evaluate(r, {}, policy, NOW)[1] == "no_confirmed_janitor_stop"
+    assert evaluate(r, s, policy, NOW)[1] == "recovery_grace"
+    assert evaluate(r, s, policy, NOW + timedelta(hours=23))[0] is None
+    assert evaluate(r, s, policy, NOW + timedelta(hours=24))[0] == "delete"
+    r["snapshot"]["vm_size"] = iso(NOW)
+    assert evaluate(r, s, policy, NOW + timedelta(hours=25))[1] == "no_confirmed_janitor_stop"
+
+
+def test_extension_revokes_previous_stop_authority(policy, cloud):
+    r = next(iter(cloud.resources.values()))
+    r["labels"]["janitor-expires-at"] = "2027-01-01T00:00:00Z"
+    s = {"stop": {}, "quarantine": {}}
+    evaluate(r, s, policy, NOW)
+    assert s == {}
