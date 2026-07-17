@@ -4,7 +4,7 @@ from datetime import timedelta
 import pytest
 from conftest import NOW
 
-from janitor.config import ConfigError, iso, narrow
+from janitor.config import ConfigError, iso, load_policy, narrow
 from janitor.models import fingerprint
 from janitor.policy import evaluate
 
@@ -111,3 +111,8 @@ def test_extension_revokes_previous_stop_authority(policy, cloud):
     s = {"stop": {}, "quarantine": {}}
     evaluate(r, s, policy, NOW)
     assert s == {}
+
+
+def test_policy_is_not_read_from_untrusted_request_environment():
+    with pytest.raises(ConfigError):
+        load_policy({"JANITOR_POLICY": "[]"})
