@@ -1,5 +1,5 @@
 import pytest
-from conftest import vm
+from conftest import cluster, pool, vm
 
 from janitor.resources import normalize
 
@@ -46,3 +46,32 @@ def test_region_must_be_explicitly_enrolled(policy):
     raw = vm()
     raw["location"] = "westus"
     assert normalize(policy, "compute", raw["id"], raw)["protection"] == "location_not_enrolled"
+
+
+def test_aks_enrollment_uses_resource_tags_and_current_capacity(policy):
+    raw = pool()
+    resource = normalize(policy, "aks", raw["id"], raw, cluster=cluster())
+    assert resource["snapshot"]["count"] == 3
+    assert resource["status"] == "active" and resource["protection"] is None
+    raw["properties"]["tags"] = {}
+    raw["properties"]["nodeLabels"] = {"janitor-managed": "true"}
+    assert normalize(policy, "aks", raw["id"], raw, cluster=cluster())["labels"] == {}
+
+
+@pytest.mark.parametrize(
+    "field,value,reason",
+    [
+        ("mode", "System", "system_or_gateway_pool"),
+        ("mode", "Gateway", "system_or_gateway_pool"),
+        ("type", "VirtualMachines", "unsupported_pool_type"),
+        ("enableAutoScaling", True, "autoscaling_enabled"),
+        ("scaleSetPriority", "Spot", "spot_pool"),
+        ("osDiskType", "Ephemeral", "ephemeral_or_unknown_os_disk"),
+        ("count", 11, "pool_capacity_limit"),
+        ("eTag", None, "missing_etag"),
+    ],
+)
+def test_aks_safety_exclusions(policy, field, value, reason):
+    raw = pool()
+    raw["properties"][field] = value
+    assert normalize(policy, "aks", raw["id"], raw, cluster=cluster())["protection"] == reason
