@@ -1,5 +1,5 @@
 import pytest
-from conftest import cluster, pool, vm
+from conftest import PREFIX, cluster, pool, vm
 
 from janitor.resources import normalize
 
@@ -75,3 +75,27 @@ def test_aks_safety_exclusions(policy, field, value, reason):
     raw = pool()
     raw["properties"][field] = value
     assert normalize(policy, "aks", raw["id"], raw, cluster=cluster())["protection"] == reason
+
+
+def test_aks_stopped_cluster_is_not_mutated(policy):
+    raw, c = pool(), cluster()
+    c["properties"]["powerState"]["code"] = "Stopped"
+    assert (
+        normalize(policy, "aks", raw["id"], raw, cluster=c)["protection"] == "cluster_not_running"
+    )
+
+
+def test_whole_function_app_stop_requires_disruption_opt_in(policy):
+    name = f"{PREFIX}/microsoft.web/sites/function-app"
+    raw = dict(
+        id=name,
+        kind="functionapp,linux",
+        location="eastus",
+        tags={"janitor-managed": "true"},
+        properties={"state": "Running", "serverFarmId": "plan"},
+    )
+    assert (
+        normalize(policy, "app_services", name, raw)["protection"] == "whole_app_stop_not_approved"
+    )
+    raw["tags"]["janitor-allow-disruption"] = "true"
+    assert normalize(policy, "app_services", name, raw)["protection"] is None
