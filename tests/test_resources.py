@@ -99,3 +99,30 @@ def test_whole_function_app_stop_requires_disruption_opt_in(policy):
     )
     raw["tags"]["janitor-allow-disruption"] = "true"
     assert normalize(policy, "app_services", name, raw)["protection"] is None
+
+
+def test_container_app_snapshot_excludes_secrets(policy):
+    name = f"{PREFIX}/microsoft.app/containerapps/app"
+    raw = dict(
+        id=name,
+        location="East US",
+        properties={
+            "provisioningState": "Succeeded",
+            "runningStatus": "Running",
+            "configuration": {"secrets": [{"value": "never-record"}]},
+        },
+    )
+    resource = normalize(policy, "container_apps", name, raw)
+    assert resource["status"] == "active"
+    assert "never-record" not in str(resource)
+
+
+def test_logic_app_disabled_state(policy):
+    name = f"{PREFIX}/microsoft.logic/workflows/timer"
+    resource = normalize(
+        policy,
+        "logic_apps",
+        name,
+        dict(id=name, location="eastus", properties={"state": "Disabled"}),
+    )
+    assert resource["status"] == "inactive"
