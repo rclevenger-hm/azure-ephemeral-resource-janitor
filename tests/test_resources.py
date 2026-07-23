@@ -1,6 +1,9 @@
+from dataclasses import replace
+
 import pytest
 from conftest import PREFIX, cluster, pool, vm
 
+from janitor.models import tags
 from janitor.resources import normalize
 
 
@@ -126,3 +129,26 @@ def test_logic_app_disabled_state(policy):
         dict(id=name, location="eastus", properties={"state": "Disabled"}),
     )
     assert resource["status"] == "inactive"
+
+
+def test_tag_names_are_case_insensitive_but_values_are_not():
+    assert tags({"JANITOR-MANAGED": "true"}) == {"janitor-managed": "true"}
+    assert tags({"janitor-managed": "True"}) == {"janitor-managed": "True"}
+    with pytest.raises(ValueError):
+        tags({"JANITOR-MANAGED": "false", "janitor-managed": "true"})
+
+
+def test_policy_names_cannot_escape_scopes(policy):
+    from janitor.config import ConfigError
+
+    for name in [
+        vm()["id"].replace("ephemeral", "production"),
+        vm()["id"] + "/../../other",
+        vm()["id"] + "?force=true",
+        vm()["id"].replace("virtualmachines", "disks"),
+    ]:
+        with pytest.raises(ConfigError):
+            policy.validate_name(name, "compute")
+    assert policy.validate_name(vm()["id"].upper(), "compute") == vm()["id"]
+    with pytest.raises(ConfigError):
+        replace(policy, max_pool_nodes=0)
