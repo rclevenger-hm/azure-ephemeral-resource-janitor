@@ -152,3 +152,20 @@ def test_policy_names_cannot_escape_scopes(policy):
     assert policy.validate_name(vm()["id"].upper(), "compute") == vm()["id"]
     with pytest.raises(ConfigError):
         replace(policy, max_pool_nodes=0)
+
+
+def test_vm_snapshot_omits_sas_and_records_delete_options(policy):
+    raw = vm()
+    raw["properties"]["storageProfile"]["osDisk"]["vhd"] = {"uri": "https://example?sig=secret"}
+    result = normalize(policy, "compute", raw["id"], raw)
+    assert "secret" not in str(result)
+    assert result["snapshot"]["storage"]["os_disk"]["delete_option"] == "Delete"
+
+
+def test_aks_node_auto_provisioning_cluster_is_protected(policy):
+    raw, parent = pool(), cluster()
+    parent["properties"]["nodeProvisioningProfile"] = {"mode": "Auto"}
+    assert (
+        normalize(policy, "aks", raw["id"], raw, cluster=parent)["protection"]
+        == "node_auto_provisioning"
+    )
