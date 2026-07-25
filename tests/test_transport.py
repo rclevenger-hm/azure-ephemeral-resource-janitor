@@ -1,0 +1,40 @@
+import pytest
+import requests
+import responses
+from conftest import SUB, Credential
+
+from janitor.config import ConfigError
+from janitor.transport import ARM, ARMClient
+
+
+@pytest.fixture
+def client(policy):
+    return ARMClient(policy, Credential(), requests.Session())
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://attacker.invalid/path",
+        f"http://management.azure.com/subscriptions/{SUB}",
+        "https://management.azure.com/subscriptions/99999999-2222-3333-4444-555555555555/resources",
+        f"https://management.azure.com/subscriptions/{SUB}/../other",
+        f"https://management.azure.com/subscriptions/{SUB}/%2e%2e/other",
+        f"https://management.azure.com@attacker.invalid/subscriptions/{SUB}",
+        f"https://management.azure.com/subscriptions/{SUB}evil/resources",
+    ],
+)
+def test_token_never_sent_to_untrusted_host_or_scope(client, url):
+    with pytest.raises(ConfigError):
+        client.get("resources", url)
+
+
+@responses.activate
+def test_pagination_follows_same_collection(client):
+    path = (
+        f"/subscriptions/{SUB}/resourcegroups/ephemeral/providers/microsoft.compute/virtualmachines"
+    )
+    next_url = ARM + path + "?api-version=2025-04-01&$skiptoken=page2"
+    responses.get(ARM + path, json={"value": [{"id": "one"}], "nextLink": next_url})
+    responses.get(next_url, json={"value": [{"id": "two"}]})
+    assert list(client.pages("compute", path)) == [{"id": "one"}, {"id": "two"}]
