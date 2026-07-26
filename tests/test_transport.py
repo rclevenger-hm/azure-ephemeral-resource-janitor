@@ -4,7 +4,7 @@ import responses
 from conftest import SUB, Credential
 
 from janitor.config import ConfigError
-from janitor.transport import ARM, ARMClient
+from janitor.transport import ARM, APIError, ARMClient
 
 
 @pytest.fixture
@@ -38,3 +38,22 @@ def test_pagination_follows_same_collection(client):
     responses.get(ARM + path, json={"value": [{"id": "one"}], "nextLink": next_url})
     responses.get(next_url, json={"value": [{"id": "two"}]})
     assert list(client.pages("compute", path)) == [{"id": "one"}, {"id": "two"}]
+
+
+@responses.activate
+def test_pagination_cannot_expand_resource_group(client):
+    path = (
+        f"/subscriptions/{SUB}/resourcegroups/ephemeral/providers/microsoft.compute/virtualmachines"
+    )
+    responses.get(ARM + path, json={"nextLink": ARM + path.replace("ephemeral", "production")})
+    with pytest.raises(APIError):
+        list(client.pages("compute", path))
+
+
+@responses.activate
+def test_repeated_pagination_token_stops_discovery(client):
+    path = f"/subscriptions/{SUB}/resources"
+    responses.get(ARM + path, json={"nextLink": ARM + path})
+    with pytest.raises(APIError):
+        list(client.pages("resources", path))
+    assert len(responses.calls) == 2
