@@ -57,3 +57,24 @@ def test_repeated_pagination_token_stops_discovery(client):
     with pytest.raises(APIError):
         list(client.pages("resources", path))
     assert len(responses.calls) == 2
+
+
+@responses.activate
+def test_mutation_is_not_retried(client):
+    path = (
+        f"/subscriptions/{SUB}/resourcegroups/ephemeral/providers"
+        "/microsoft.compute/virtualmachines/vm/deallocate"
+    )
+    responses.post(ARM + path, status=503)
+    with pytest.raises(APIError):
+        client.request("compute", path, "POST")
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+def test_redirects_are_not_followed(client):
+    path = f"/subscriptions/{SUB}/resources"
+    responses.get(ARM + path, status=302, headers={"Location": "https://attacker.invalid/"})
+    with pytest.raises(APIError):
+        client.get("resources", path)
+    assert len(responses.calls) == 1
