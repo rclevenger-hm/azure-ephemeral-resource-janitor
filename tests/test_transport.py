@@ -78,3 +78,30 @@ def test_redirects_are_not_followed(client):
     with pytest.raises(APIError):
         client.get("resources", path)
     assert len(responses.calls) == 1
+
+
+@responses.activate
+def test_http_deadline_reached_before_token_or_request(client):
+    client.check_time = lambda: (_ for _ in ()).throw(TimeoutError())
+    with pytest.raises(TimeoutError):
+        client.get("resources", f"/subscriptions/{SUB}/resources")
+    assert not responses.calls
+
+
+@pytest.mark.parametrize(
+    "code,body,mode,outcome",
+    [
+        (200, {"status": "Succeeded"}, "status", "succeeded"),
+        (200, {"status": "Running"}, "status", "pending"),
+        (200, {"status": "Failed"}, "status", "failed"),
+        (200, {"status": "Canceled"}, "status", "failed"),
+        (202, {}, "location", "pending"),
+        (200, {"properties": {}}, "location", "succeeded"),
+        (204, None, "location", "succeeded"),
+    ],
+)
+@responses.activate
+def test_arm_long_running_operation_states(client, code, body, mode, outcome):
+    url = f"{ARM}/subscriptions/{SUB}/providers/Microsoft.Compute/locations/eastus/operations/op"
+    responses.get(url, status=code, json=body)
+    assert client.poll({"kind": "compute", "url": url, "mode": mode}) == outcome
