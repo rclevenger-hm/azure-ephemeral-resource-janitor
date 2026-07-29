@@ -105,3 +105,18 @@ def test_arm_long_running_operation_states(client, code, body, mode, outcome):
     url = f"{ARM}/subscriptions/{SUB}/providers/Microsoft.Compute/locations/eastus/operations/op"
     responses.get(url, status=code, json=body)
     assert client.poll({"kind": "compute", "url": url, "mode": mode}) == outcome
+
+
+@responses.activate
+def test_unknown_operation_response_is_not_success(client):
+    url = f"{ARM}/subscriptions/{SUB}/operations/op"
+    responses.get(url, json={})
+    with pytest.raises(APIError):
+        client.poll({"kind": "compute", "url": url, "mode": "status"})
+
+
+def test_accepted_operation_requires_reconciliation_url(client):
+    response = requests.Response()
+    response.status_code = 202
+    with pytest.raises(APIError):
+        client.operation("compute", response, "vm")
