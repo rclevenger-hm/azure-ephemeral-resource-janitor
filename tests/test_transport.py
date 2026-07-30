@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 import requests
 import responses
@@ -120,3 +122,16 @@ def test_accepted_operation_requires_reconciliation_url(client):
     response.status_code = 202
     with pytest.raises(APIError):
         client.operation("compute", response, "vm")
+
+
+def test_operation_rejects_foreign_polling_url(client):
+    response = requests.Response()
+    response.status_code = 202
+    response.headers["Azure-AsyncOperation"] = "https://attacker.invalid/"
+    with pytest.raises(ConfigError):
+        client.operation("compute", response, "vm")
+
+
+def test_operator_managed_identity_needs_explicit_client_id(policy):
+    with pytest.raises(ConfigError):
+        replace(policy, credential_mode="managed_identity")
