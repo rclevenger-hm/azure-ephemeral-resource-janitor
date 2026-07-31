@@ -135,3 +135,8 @@ def test_operation_rejects_foreign_polling_url(client):
 def test_operator_managed_identity_needs_explicit_client_id(policy):
     with pytest.raises(ConfigError):
         replace(policy, credential_mode="managed_identity")
+
+
+def test_janitor_infrastructure_cannot_be_enrolled(policy):
+    with pytest.raises(ConfigError):
+        replace(policy, resource_groups=(policy.state_resource_group,))
