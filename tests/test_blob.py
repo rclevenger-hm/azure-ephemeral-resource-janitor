@@ -30,3 +30,27 @@ def test_replace_and_delete_require_current_etag(policy):
     assert objects.write("state.json", {}, '"v1"') == '"v2"'
     objects.delete("state.json", '"v2"')
     assert [c.request.headers["If-Match"] for c in responses.calls] == ['"v1"', '"v2"']
+
+
+@responses.activate
+def test_read_pins_download_to_observed_etag(policy):
+    body = b'{"schema": 1}'
+    responses.head(endpoint(policy), headers={"ETag": '"v1"', "Content-Length": str(len(body))})
+    responses.get(
+        endpoint(policy),
+        body=body,
+        headers={
+            "ETag": '"v1"',
+            "Content-Length": str(len(body)),
+            "Content-Range": f"bytes 0-{len(body) - 1}/{len(body)}",
+        },
+        status=206,
+    )
+    assert BlobObjects.connect(policy, Credential()).read("state.json") == ({"schema": 1}, '"v1"')
+    assert responses.calls[1].request.headers["If-Match"] == '"v1"'
+
+
+@responses.activate
+def test_missing_blob_has_create_generation(policy):
+    responses.head(endpoint(policy), status=404, headers={"x-ms-error-code": "BlobNotFound"})
+    assert BlobObjects.connect(policy, Credential()).read("state.json") == (None, 0)
