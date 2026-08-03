@@ -1,6 +1,8 @@
 import json
 
+import pytest
 import responses
+from azure.core.exceptions import HttpResponseError, ResourceExistsError, ResourceModifiedError
 from conftest import Credential
 
 from janitor.blob import BlobObjects
@@ -54,3 +56,26 @@ def test_read_pins_download_to_observed_etag(policy):
 def test_missing_blob_has_create_generation(policy):
     responses.head(endpoint(policy), status=404, headers={"x-ms-error-code": "BlobNotFound"})
     assert BlobObjects.connect(policy, Credential()).read("state.json") == (None, 0)
+
+
+@pytest.mark.parametrize("code,error", [(409, ResourceExistsError), (412, ResourceModifiedError)])
+@responses.activate
+def test_conditional_conflicts_are_not_retried(policy, code, error):
+    responses.put(
+        endpoint(policy),
+        status=code,
+        headers={"x-ms-error-code": "BlobAlreadyExists" if code == 409 else "ConditionNotMet"},
+    )
+    with pytest.raises(error):
+        BlobObjects.connect(policy, Credential()).write(
+            "state.json", {}, 0 if code == 409 else '"old"'
+        )
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+def test_sdk_does_not_retry_uncertain_write(policy):
+    responses.put(endpoint(policy), status=503, headers={"x-ms-error-code": "ServerBusy"})
+    with pytest.raises(HttpResponseError):
+        BlobObjects.connect(policy, Credential()).write("state.json", {}, 0)
+    assert len(responses.calls) == 1
