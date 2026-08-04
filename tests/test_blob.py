@@ -79,3 +79,12 @@ def test_sdk_does_not_retry_uncertain_write(policy):
     with pytest.raises(HttpResponseError):
         BlobObjects.connect(policy, Credential()).write("state.json", {}, 0)
     assert len(responses.calls) == 1
+
+
+@responses.activate
+def test_read_race_fails_instead_of_pairing_new_body_with_old_etag(policy):
+    responses.head(endpoint(policy), headers={"ETag": '"v1"', "Content-Length": "2"})
+    responses.get(endpoint(policy), status=412, headers={"x-ms-error-code": "ConditionNotMet"})
+    with pytest.raises(ResourceModifiedError):
+        BlobObjects.connect(policy, Credential()).read("state.json")
+    assert len(responses.calls) == 2
