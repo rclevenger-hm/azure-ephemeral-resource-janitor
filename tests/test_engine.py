@@ -2,6 +2,7 @@ import pytest
 from conftest import NOW, Cloud, vm
 
 from janitor.engine import run
+from janitor.state import RunLocked, StateError, Store
 from janitor.transport import APIError
 
 
@@ -40,3 +41,39 @@ def test_partial_results_survive_action_failure(policy, store, code, expected_ac
     assert durable["resources"][0]["outcome"] == "submitted"
     state, _ = store.read("state.json")
     assert ("pending" in state["resources"][names[1]]) == (code in (503, 429))
+
+
+def test_unknown_action_is_not_repeated_on_next_run(policy, cloud, store):
+    name = next(iter(cloud.resources))
+    cloud.failures[name] = TimeoutError()
+    assert execute(policy, cloud, store)["status"] == "failed"
+    cloud.failures.clear()
+    assert execute(policy, cloud, store)["status"] == "partial"
+    assert len(cloud.actions) == 1
+
+
+@pytest.mark.parametrize("checkpoint", ["plan", "intent", "outcome", "state_outcome"])
+def test_checkpoint_failure_retains_lock_and_blocks_later_workers(
+    policy, cloud, store, objects, checkpoint
+):
+    def fail(key, body):
+        if checkpoint == "plan":
+            return "/runs/" in key and body["status"] == "executing"
+        if checkpoint == "intent":
+            return key.endswith("state.json") and any(
+                "pending" in e for e in body["resources"].values()
+            )
+        if checkpoint == "outcome":
+            return "/runs/" in key and any(p["outcome"] == "submitted" for p in body["resources"])
+        return key.endswith("state.json") and any(
+            "operation" in e for e in body["resources"].values()
+        )
+
+    objects.fail = fail
+    with pytest.raises(StateError):
+        execute(policy, cloud, store)
+    assert store.read("lock.json")[0]
+    assert len(cloud.actions) == (checkpoint in ("outcome", "state_outcome"))
+    objects.fail = lambda key, body: False
+    with pytest.raises(RunLocked):
+        execute(policy, cloud, Store(objects, policy))
