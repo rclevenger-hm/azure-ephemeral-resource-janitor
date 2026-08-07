@@ -1,6 +1,7 @@
 import pytest
 from conftest import NOW, Cloud, vm
 
+from janitor.config import iso
 from janitor.engine import run
 from janitor.state import RunLocked, StateError, Store
 from janitor.transport import APIError
@@ -77,3 +78,17 @@ def test_checkpoint_failure_retains_lock_and_blocks_later_workers(
     objects.fail = lambda key, body: False
     with pytest.raises(RunLocked):
         execute(policy, cloud, Store(objects, policy))
+
+
+def test_two_workers_cannot_share_lock(policy, cloud, store, objects):
+    store.acquire("a" * 32, iso(NOW))
+    with pytest.raises(RunLocked):
+        execute(policy, cloud, Store(objects, policy))
+    assert not cloud.actions
+
+
+def test_lock_generation_change_fences_checkpoints(policy, store, objects):
+    state = store.acquire("a" * 32, iso(NOW))
+    objects.write(store.prefix + "lock.json", {"run_id": "a" * 32}, store.lock_generation)
+    with pytest.raises(StateError):
+        store.save_state(state)
