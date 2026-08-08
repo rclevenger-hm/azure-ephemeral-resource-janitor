@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 from conftest import NOW, Cloud, vm
 
@@ -92,3 +94,24 @@ def test_lock_generation_change_fences_checkpoints(policy, store, objects):
     objects.write(store.prefix + "lock.json", {"run_id": "a" * 32}, store.lock_generation)
     with pytest.raises(StateError):
         store.save_state(state)
+
+
+def test_completed_execution_is_not_replayed(policy, cloud, store):
+    first = execute(policy, cloud, store, run_id="a" * 32)
+    duplicate = execute(policy, cloud, store, run_id="a" * 32)
+    assert duplicate["duplicate"] and duplicate["run_id"] == first["run_id"]
+    assert len(cloud.actions) == 1
+
+
+def test_shared_budget_applies_across_independent_workers(policy, store, objects):
+    policy = replace(policy, max_actions_per_run=1, max_actions_per_window=1)
+    one = Cloud(policy, [vm("vm-a")])
+    two = Cloud(policy, [vm("vm-b")])
+    two.resources.update(one.resources)
+    execute(policy, one, store)
+    result = execute(policy, two, Store(objects, policy))
+    assert result["reasons"] == {
+        "shared_budget_exhausted": 1,
+        "stop_confirmed_waiting_for_state": 1,
+    }
+    assert not two.actions
