@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import timedelta
 
 import pytest
 from conftest import NOW, Cloud, vm
@@ -115,3 +116,19 @@ def test_shared_budget_applies_across_independent_workers(policy, store, objects
         "stop_confirmed_waiting_for_state": 1,
     }
     assert not two.actions
+
+
+def test_window_expiry_allows_new_action(policy, cloud, store):
+    policy = replace(policy, max_actions_per_run=1, max_actions_per_window=1)
+    execute(policy, cloud, store)
+    name = next(iter(cloud.resources))
+    cloud.resources[name]["snapshot"]["vm_size"] = iso(NOW + timedelta(hours=2))
+    run(policy, {}, cloud, store, clock=lambda: NOW + timedelta(hours=2))
+    assert len(cloud.actions) == 2
+
+
+def test_budget_policy_change_requires_reconciliation(policy, cloud, store):
+    execute(policy, cloud, store)
+    result = execute(replace(policy, window_seconds=7200), cloud, store)
+    assert result["error"] == "budget_policy_changed"
+    assert len(cloud.actions) == 1
