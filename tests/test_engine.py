@@ -132,3 +132,26 @@ def test_budget_policy_change_requires_reconciliation(policy, cloud, store):
     result = execute(replace(policy, window_seconds=7200), cloud, store)
     assert result["error"] == "budget_policy_changed"
     assert len(cloud.actions) == 1
+
+
+def test_dryrun_has_no_workload_mutations_or_budget_reservations(policy, cloud, store):
+    result = run(policy, {"dry_run": True}, cloud, store, clock=lambda: NOW)
+    assert result["counts"] == {"would_act": 1}
+    assert not cloud.actions
+    assert store.read("state.json")[0]["reservations"] == []
+
+
+def test_changed_labels_between_plan_and_action_are_rejected(policy, cloud, store):
+    calls = 0
+
+    def change(resource):
+        nonlocal calls
+        calls += 1
+        if calls >= 2:
+            resource["labels"]["do-not-cleanup"] = "true"
+        return resource
+
+    cloud.refresh_hook = change
+    result = execute(policy, cloud, store)
+    assert result["reasons"] == {"changed_before_action": 1}
+    assert not cloud.actions
