@@ -155,3 +155,15 @@ def test_changed_labels_between_plan_and_action_are_rejected(policy, cloud, stor
     result = execute(policy, cloud, store)
     assert result["reasons"] == {"changed_before_action": 1}
     assert not cloud.actions
+
+
+def test_full_discovery_must_succeed_before_mutation(policy, cloud, store):
+    cloud.discovery_error = APIError(503)
+    assert execute(policy, cloud, store)["status"] == "failed"
+    assert not cloud.actions
+
+
+def test_discovery_bound_fails_without_actions(policy, store):
+    cloud = Cloud(policy, [vm("vm-a"), vm("vm-b")])
+    assert execute(replace(policy, max_resources=1), cloud, store)["status"] == "failed"
+    assert not cloud.actions
