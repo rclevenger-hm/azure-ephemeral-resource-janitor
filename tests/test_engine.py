@@ -167,3 +167,20 @@ def test_discovery_bound_fails_without_actions(policy, store):
     cloud = Cloud(policy, [vm("vm-a"), vm("vm-b")])
     assert execute(replace(policy, max_resources=1), cloud, store)["status"] == "failed"
     assert not cloud.actions
+
+
+def test_malformed_ttl_does_not_block_other_resources(policy, store):
+    bad = vm("vm-a")
+    bad["tags"].pop("janitor-expires-at")
+    bad["tags"]["janitor-ttl-hours"] = "NaN"
+    cloud = Cloud(policy, [bad, vm("vm-b")])
+    result = execute(policy, cloud, store)
+    assert result["counts"] == {"skipped": 1, "submitted": 1}
+    assert len(cloud.actions) == 1
+
+
+def test_request_subset_excludes_every_other_resource(policy, store):
+    cloud = Cloud(policy, [vm("vm-a"), vm("vm-b")])
+    name = next(iter(cloud.resources))
+    run(policy, {"resource_ids": [name]}, cloud, store, clock=lambda: NOW)
+    assert [a[0] for a in cloud.actions] == [name]
