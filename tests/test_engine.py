@@ -184,3 +184,32 @@ def test_request_subset_excludes_every_other_resource(policy, store):
     name = next(iter(cloud.resources))
     run(policy, {"resource_ids": [name]}, cloud, store, clock=lambda: NOW)
     assert [a[0] for a in cloud.actions] == [name]
+
+
+@pytest.mark.parametrize(
+    "operation_state,reason", [("pending", "operation_in_progress"), ("failed", "operation_failed")]
+)
+def test_operations_must_complete_before_lifecycle_progress(
+    policy, cloud, store, operation_state, reason
+):
+    execute(policy, cloud, store)
+    cloud.poll_result = operation_state
+    result = execute(policy, cloud, store)
+    assert result["reasons"] == {reason: 1}
+    assert len(cloud.actions) == 1
+
+
+def test_end_to_end_stop_confirm_grace_delete(policy, cloud, store):
+    policy = replace(policy, mode="lifecycle")
+    r = next(iter(cloud.resources.values()))
+    r["labels"]["janitor-allow-delete"] = "true"
+    execute(policy, cloud, store)
+    r["status"] = "inactive"
+    r["snapshot"].update(power_state="PowerState/deallocated", power_time=iso(NOW))
+    assert execute(policy, cloud, store)["reasons"] == {"recovery_grace": 1}
+    run(policy, {}, cloud, store, clock=lambda: NOW + timedelta(hours=25))
+    assert [a[1] for a in cloud.actions] == ["deallocate", "delete"]
+    cloud.resources.clear()
+    result = run(policy, {}, cloud, store, clock=lambda: NOW + timedelta(hours=26))
+    assert result["reasons"] == {"deletion_confirmed": 1}
+    assert not store.read("state.json")[0]["resources"][r["id"]].get("operation")
