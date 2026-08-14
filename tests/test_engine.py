@@ -213,3 +213,23 @@ def test_end_to_end_stop_confirm_grace_delete(policy, cloud, store):
     result = run(policy, {}, cloud, store, clock=lambda: NOW + timedelta(hours=26))
     assert result["reasons"] == {"deletion_confirmed": 1}
     assert not store.read("state.json")[0]["resources"][r["id"]].get("operation")
+
+
+def test_history_does_not_expand_current_service_scope(policy, cloud, store):
+    execute(policy, cloud, store)
+    result = execute(replace(policy, services=()), cloud, store)
+    assert result["reasons"] == {"service_no_longer_enabled": 1}
+    assert len(cloud.actions) == 1
+
+
+def test_deadline_stops_before_first_api_mutation(policy, cloud, store):
+    calls = 0
+
+    def remaining():
+        nonlocal calls
+        calls += 1
+        return 480 if calls < 4 else 30
+
+    result = execute(policy, cloud, store, remaining=remaining)
+    assert result["status"] == "failed"
+    assert not cloud.actions
