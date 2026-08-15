@@ -1,3 +1,4 @@
+import copy
 from dataclasses import replace
 from datetime import timedelta
 
@@ -233,3 +234,48 @@ def test_deadline_stops_before_first_api_mutation(policy, cloud, store):
     result = execute(policy, cloud, store, remaining=remaining)
     assert result["status"] == "failed"
     assert not cloud.actions
+
+
+def test_failed_report_does_not_erase_existing_durable_partial_plan(policy, cloud, store, objects):
+    snapshots = []
+
+    def fail(key, body):
+        if "/runs/" in key:
+            snapshots.append(copy.deepcopy(body))
+            return any(p["outcome"] == "submitted" for p in body["resources"])
+        return False
+
+    objects.fail = fail
+    with pytest.raises(StateError):
+        execute(policy, cloud, store)
+    report, _ = store.read(f"runs/{store.run_id}.json")
+    assert report["resources"][0]["outcome"] == "pending"
+    assert store.read("state.json")[0]["resources"][next(iter(cloud.resources))]["pending"]
+
+
+@pytest.mark.parametrize(
+    "kind,action",
+    [
+        ("aks", "stop_pool"),
+        ("container_apps", "stop_app"),
+        ("app_services", "stop_app"),
+        ("logic_apps", "disable_workflow"),
+    ],
+)
+def test_quarantine_is_not_repeated_after_manual_restore(policy, cloud, store, kind, action):
+    from conftest import PREFIX
+
+    from janitor.config import TYPES
+
+    name = f"{PREFIX}/{TYPES[kind]}/app"
+    if kind == "aks":
+        name += "/agentpools/userpool"
+    resource = next(iter(cloud.resources.values()))
+    resource.update(id=name, kind=kind)
+    cloud.resources = {name: resource}
+    execute(policy, cloud, store)
+    assert cloud.actions[0][1] == action
+    assert execute(policy, cloud, store)["reasons"] == {
+        "quarantine_submitted_or_manually_restored": 1
+    }
+    assert len(cloud.actions) == 1
