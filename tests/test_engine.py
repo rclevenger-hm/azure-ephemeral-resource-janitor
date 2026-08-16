@@ -279,3 +279,18 @@ def test_quarantine_is_not_repeated_after_manual_restore(policy, cloud, store, k
         "quarantine_submitted_or_manually_restored": 1
     }
     assert len(cloud.actions) == 1
+
+
+def test_inherited_lock_prevents_action_and_reservation(policy, cloud, store):
+    cloud.protection_result = "management_lock"
+    assert execute(policy, cloud, store)["reasons"] == {"management_lock": 1}
+    assert not cloud.actions
+    assert not store.read("state.json")[0]["reservations"]
+
+
+def test_expiry_extension_clears_stop_history_durably(policy, cloud, store):
+    execute(policy, cloud, store)
+    resource = next(iter(cloud.resources.values()))
+    resource["labels"]["janitor-expires-at"] = "2027-01-01T00:00:00Z"
+    assert execute(policy, cloud, store)["reasons"] == {"not_expired": 1}
+    assert "stop" not in store.read("state.json")[0]["resources"][resource["id"]]
