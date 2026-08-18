@@ -2,9 +2,10 @@ import json
 
 import pytest
 import responses
-from conftest import Credential, cluster, pool, vm
+from conftest import SUB, TENANT, Credential, cluster, pool, vm
 
 from janitor.azure import Azure
+from janitor.config import ConfigError
 from janitor.resources import normalize
 from janitor.transport import ARM
 
@@ -34,3 +35,31 @@ def test_pool_stop_uses_etag_and_preserves_capacity(policy):
     request = responses.calls[0].request
     assert request.headers["If-Match"] == '"pool-etag"'
     assert json.loads(request.body) == {"properties": {"powerState": {"code": "Stopped"}}}
+
+
+@pytest.mark.parametrize(
+    "kind,provider,action,suffix",
+    [
+        ("container_apps", "microsoft.app/containerapps", "stop_app", "stop"),
+        ("app_services", "microsoft.web/sites", "stop_app", "stop"),
+        ("logic_apps", "microsoft.logic/workflows", "disable_workflow", "disable"),
+    ],
+)
+@responses.activate
+def test_application_action_routes(policy, kind, provider, action, suffix):
+    name = f"{policy.subscription_prefix}/resourcegroups/ephemeral/providers/{provider}/app"
+    responses.post(ARM + name + "/" + suffix, status=200, json={})
+    Azure(policy, Credential()).act({"id": name, "kind": kind}, action, "correlation-uuid")
+    assert len(responses.calls) == 1
+    assert not responses.calls[0].request.body
+
+
+@pytest.mark.parametrize(
+    "change", [{"tenantId": SUB}, {"subscriptionId": TENANT}, {"state": "Disabled"}]
+)
+@responses.activate
+def test_wrong_tenant_subscription_or_disabled_subscription_fails_closed(policy, change):
+    raw = {"subscriptionId": SUB, "tenantId": TENANT, "state": "Enabled", **change}
+    responses.get(ARM + policy.subscription_prefix, json=raw)
+    with pytest.raises(ConfigError):
+        Azure(policy, Credential()).verify_subscription()
