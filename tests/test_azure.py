@@ -63,3 +63,47 @@ def test_wrong_tenant_subscription_or_disabled_subscription_fails_closed(policy,
     responses.get(ARM + policy.subscription_prefix, json=raw)
     with pytest.raises(ConfigError):
         Azure(policy, Credential()).verify_subscription()
+
+
+@responses.activate
+def test_storage_endpoint_must_match_operator_account(policy):
+    responses.get(
+        ARM + policy.state_account_id,
+        json={
+            "id": policy.state_account_id,
+            "properties": {"primaryEndpoints": {"blob": "https://other.invalid"}},
+        },
+    )
+    with pytest.raises(ConfigError):
+        Azure(policy, Credential()).store()
+    assert len(responses.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "level,action,blocked",
+    [
+        ("ReadOnly", "deallocate", True),
+        ("CanNotDelete", "delete", True),
+        ("CanNotDelete", "deallocate", False),
+    ],
+)
+@responses.activate
+def test_inherited_subscription_locks(policy, level, action, blocked):
+    raw = vm()
+    resource = normalize(policy, "compute", raw["id"], raw)
+    lock_path = "/providers/Microsoft.Authorization/locks"
+    responses.get(
+        ARM + policy.subscription_prefix + lock_path,
+        json={
+            "value": [
+                {
+                    "id": policy.subscription_prefix + lock_path + "/protection",
+                    "properties": {"level": level},
+                }
+            ]
+        },
+    )
+    group = f"{policy.subscription_prefix}/resourcegroups/ephemeral"
+    for scope in (group, raw["id"]):
+        responses.get(ARM + scope + lock_path, json={"value": []})
+    assert bool(Azure(policy, Credential()).protection(resource, action)) is blocked
