@@ -1,4 +1,6 @@
+import copy
 import json
+from dataclasses import replace
 
 import pytest
 import responses
@@ -107,3 +109,41 @@ def test_inherited_subscription_locks(policy, level, action, blocked):
     for scope in (group, raw["id"]):
         responses.get(ARM + scope + lock_path, json={"value": []})
     assert bool(Azure(policy, Credential()).protection(resource, action)) is blocked
+
+
+@responses.activate
+def test_discovery_paginates_and_only_enrolls_tagged_vms(policy):
+    policy = replace(policy, services=("compute",))
+    group = f"{policy.subscription_prefix}/resourcegroups/ephemeral"
+    collection = group + "/providers/microsoft.compute/virtualmachines"
+    one, two = vm(), vm("vm-b")
+    excluded = copy.deepcopy(one)
+    excluded["tags"] = {}
+    responses.get(ARM + group, json={"id": group})
+    responses.get(
+        ARM + collection, json={"value": [excluded], "nextLink": ARM + collection + "?page=2"}
+    )
+    responses.get(ARM + collection, json={"value": [one, two]})
+    for raw in (one, two):
+        responses.get(
+            ARM + raw["id"] + "/instanceView", json={"statuses": [{"code": "PowerState/running"}]}
+        )
+    result = list(Azure(policy, Credential()).discover(lambda: None))
+    assert [r["id"] for r in result] == [one["id"], two["id"]]
+    assert all(r["status"] == "active" for r in result)
+
+
+@responses.activate
+def test_pool_discovery_uses_azure_tags_and_cluster_context(policy):
+    policy = replace(policy, services=("aks",))
+    group = f"{policy.subscription_prefix}/resourcegroups/ephemeral"
+    parent, raw = cluster(), pool()
+    responses.get(ARM + group, json={"id": group})
+    responses.get(
+        ARM + group + "/providers/microsoft.containerservice/managedclusters",
+        json={"value": [parent]},
+    )
+    responses.get(ARM + parent["id"] + "/agentpools", json={"value": [raw]})
+    result = list(Azure(policy, Credential()).discover(lambda: None))
+    assert len(result) == 1 and result[0]["protection"] is None
+    assert result[0]["snapshot"]["etag"] == '"pool-etag"'
