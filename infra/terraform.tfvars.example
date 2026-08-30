@@ -1,0 +1,17 @@
+subscription_id = "11111111-2222-3333-4444-555555555555"
+tenant_id       = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+resource_groups = ["ephemeral-dev"]
+locations       = ["eastus"]
+location        = "eastus"
+state_account   = "replacewithuniquename"
+# Build and push your image, then replace this illustrative digest.
+image = "example.azurecr.io/azure-janitor@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+registry = {
+  id     = "/subscriptions/11111111-2222-3333-4444-555555555555/resourceGroups/images/providers/Microsoft.ContainerRegistry/registries/example"
+  server = "example.azurecr.io"
+}
+dry_run          = true
+schedule_enabled = false
+services         = ["compute"]
+# Add existing action-group resource IDs to enable failure notifications.
+alert_action_group_ids = []

@@ -1,0 +1,6 @@
+# Pre-existing backend, separate from the runtime checkpoint account.
+resource_group_name  = "terraform-infra"
+storage_account_name = "replacetfstateaccount"
+container_name       = "tfstate"
+key                  = "azure-ephemeral-janitor.tfstate"
+use_azuread_auth      = true
