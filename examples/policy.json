@@ -1,0 +1,20 @@
+{
+  "tenant_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  "subscription_id": "11111111-2222-3333-4444-555555555555",
+  "resource_groups": ["ephemeral-dev"],
+  "locations": ["eastus"],
+  "state_account": "replacewithuniquename",
+  "state_resource_group": "ephemeral-janitor-infra",
+  "state_container": "janitor",
+  "credential_mode": "azure_cli",
+  "services": ["compute"],
+  "dry_run": true,
+  "mode": "stop",
+  "ttl_hours": 24,
+  "grace_hours": 24,
+  "max_actions_per_run": 1,
+  "max_actions_per_window": 1,
+  "window_seconds": 3600,
+  "max_pool_nodes": 3,
+  "runtime_seconds": 480
+}
