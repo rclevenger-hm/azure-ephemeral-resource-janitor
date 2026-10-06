@@ -44,7 +44,7 @@ resource "azurerm_storage_management_policy" "reports" {
     }
     actions {
       base_blob { delete_after_days_since_modification_greater_than = 90 }
-      version { delete_after_days_since_creation_greater_than = 90 }
+      version { delete_after_days_since_creation = 90 }
       snapshot { delete_after_days_since_creation_greater_than = 90 }
     }
   }
@@ -56,7 +56,7 @@ resource "azurerm_storage_management_policy" "reports" {
       blob_types   = ["blockBlob"]
     }
     actions {
-      version { delete_after_days_since_creation_greater_than = 30 }
+      version { delete_after_days_since_creation = 30 }
       snapshot { delete_after_days_since_creation_greater_than = 30 }
     }
   }
