@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "azure-ephemeral-resource-janitor"
+version = "0.1.0"
+description = "Scheduled Azure workload cleanup with durable safety controls"
+requires-python = ">=3.12"
+dependencies = ["azure-identity>=1.20,<2", "azure-storage-blob>=12.25,<13", "requests>=2.32,<3"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "responses>=0.25,<1", "ruff>=0.11,<1"]
+
+[project.scripts]
+azure-janitor = "janitor.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
