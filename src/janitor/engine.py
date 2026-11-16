@@ -81,7 +81,13 @@ def run(operator, request, azure, store, *, run_id=None, clock=None, remaining=N
             if wanted is not None and resource["id"] not in wanted:
                 continue
             entry = state["resources"].setdefault(resource["id"], {"first_seen_at": iso(clock())})
-            action, reason = evaluate(resource, copy.deepcopy(entry), policy, clock())
+            observed = copy.deepcopy(entry)
+            action, reason = evaluate(resource, observed, policy, clock())
+            # Discovery may revoke existing VM deletion authority, but must not
+            # establish grace or reset non-VM quarantine before the full plan.
+            if resource["kind"] == "compute" and "stop" in entry and "stop" not in observed:
+                entry.pop("stop")
+                store.save_state(state)
             plans.append(
                 {
                     "id": resource["id"],

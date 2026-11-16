@@ -40,6 +40,7 @@ Tag keys are case-insensitive; ambiguous duplicate keys fail discovery closed. A
 - One conditional Blob lock serializes workers for the subscription. A rolling shared budget spans runs. Defaults: ten actions per run and per hour; AKS pools are capped at ten nodes.
 - Eligibility, tags, state, and inherited Azure management locks are refreshed immediately before action. AKS updates additionally use `If-Match`.
 - VM deletion requires this janitor's confirmed deallocation, observed deallocated state, matching resource identity and configuration, an elapsed grace period, and deletion opt-in. Default grace is 24 hours.
+- Discovery checkpoints revocations of already-confirmed VM deletion authority (for example, an observed expiry extension), even if a later discovery or refresh fails. Discovery never establishes recovery grace or resets non-VM quarantine.
 - Long-running operations are reconciled on later runs. A timeout or uncertain response leaves durable pending intent and blocks replay. Storage failures retain the lock for deliberate recovery.
 
 Azure does not provide an equivalent conditional eligibility check for every stop/delete API. VM restarts that occur entirely between observations may also be invisible. See [safety and limitations](docs/safety.md) before enabling deletion.
