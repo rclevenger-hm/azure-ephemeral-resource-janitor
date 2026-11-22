@@ -294,3 +294,93 @@ def test_expiry_extension_clears_stop_history_durably(policy, cloud, store):
     resource["labels"]["janitor-expires-at"] = "2027-01-01T00:00:00Z"
     assert execute(policy, cloud, store)["reasons"] == {"not_expired": 1}
     assert "stop" not in store.read("state.json")[0]["resources"][resource["id"]]
+
+
+def confirmed_stop(policy, cloud, store):
+    policy = replace(policy, mode="lifecycle")
+    resource = next(iter(cloud.resources.values()))
+    resource["labels"]["janitor-allow-delete"] = "true"
+    execute(policy, cloud, store)
+    resource["status"] = "inactive"
+    resource["snapshot"].update(power_state="PowerState/deallocated", power_time=iso(NOW))
+    execute(policy, cloud, store)
+    assert "stop" in store.read("state.json")[0]["resources"][resource["id"]]
+    return policy, resource
+
+
+@pytest.mark.parametrize("interruption", ["discovery", "refresh", "budget"])
+def test_discovery_revocation_survives_interrupted_run(policy, cloud, store, objects, interruption):
+    policy, resource = confirmed_stop(policy, cloud, store)
+    resource["labels"]["janitor-expires-at"] = iso(NOW + timedelta(hours=1))
+    if interruption == "discovery":
+        cloud.discovery_error = APIError(503)
+    elif interruption == "refresh":
+
+        def fail_refresh(resource):
+            raise APIError(503)
+
+        cloud.refresh_hook = fail_refresh
+    else:
+        policy = replace(policy, window_seconds=7200)
+    assert execute(policy, cloud, store)["status"] == "failed"
+    assert "stop" not in store.read("state.json")[0]["resources"][resource["id"]]
+    cloud.discovery_error = None
+    cloud.refresh_hook = lambda resource: resource
+    policy = replace(policy, window_seconds=3600)
+    result = run(policy, {}, cloud, Store(objects, policy), clock=lambda: NOW + timedelta(hours=25))
+    assert result["reasons"] == {"no_confirmed_janitor_stop": 1}
+    assert [action[1] for action in cloud.actions] == ["deallocate"]
+
+
+def test_discovery_revocation_checkpoint_failure_retains_lock(policy, cloud, store, objects):
+    policy, resource = confirmed_stop(policy, cloud, store)
+    resource["labels"]["janitor-expires-at"] = iso(NOW + timedelta(hours=1))
+    objects.fail = lambda key, body: (
+        key.endswith("state.json") and "stop" not in body["resources"][resource["id"]]
+    )
+    with pytest.raises(StateError):
+        execute(policy, cloud, store)
+    assert store.read("lock.json")[0]
+    assert [action[1] for action in cloud.actions] == ["deallocate"]
+
+
+def test_discovery_does_not_advance_stop_grace(policy, cloud, store):
+    policy, resource = confirmed_stop(policy, cloud, store)
+    before = store.read("state.json")[0]["resources"][resource["id"]]["stop"]
+    resource["snapshot"]["power_time"] = iso(NOW + timedelta(minutes=1))
+    cloud.discovery_error = APIError(503)
+    execute(policy, cloud, store)
+    assert store.read("state.json")[0]["resources"][resource["id"]]["stop"] == before
+
+
+@pytest.mark.parametrize("observation", ["restart", "configuration", "extended_expiry"])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_discovery_revokes_only_confirmed_vm_authority(policy, cloud, store, observation, dry_run):
+    policy, resource = confirmed_stop(policy, cloud, store)
+    if observation == "restart":
+        resource["status"] = "active"
+    elif observation == "configuration":
+        resource["snapshot"]["vm_size"] = "changed"
+    else:
+        resource["labels"]["janitor-expires-at"] = iso(NOW + timedelta(hours=1))
+    cloud.discovery_error = APIError(503)
+    result = run(policy, {"dry_run": dry_run}, cloud, store, clock=lambda: NOW)
+    assert result["status"] == "failed"
+    state = store.read("state.json")[0]
+    assert "stop" not in state["resources"][resource["id"]]
+    assert len(state["reservations"]) == 1
+    assert [action[1] for action in cloud.actions] == ["deallocate"]
+
+
+def test_discovery_does_not_reset_non_vm_quarantine(policy, cloud, store):
+    resource = next(iter(cloud.resources.values()))
+    resource["kind"] = "container_apps"
+    state = store.acquire("a" * 32, iso(NOW))
+    entry = {"first_seen_at": iso(NOW), "quarantine": {"action": "stop_app"}}
+    state["resources"][resource["id"]] = copy.deepcopy(entry)
+    store.save_state(state)
+    store.release()
+    resource["labels"]["janitor-expires-at"] = iso(NOW + timedelta(hours=1))
+    cloud.discovery_error = APIError(503)
+    execute(policy, cloud, store)
+    assert store.read("state.json")[0]["resources"][resource["id"]] == entry
